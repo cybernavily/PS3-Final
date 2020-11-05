@@ -1,0 +1,183 @@
+---
+title: "Predictive Analysis of Voting Trump"
+author: "Qiyu Huang & Yuhan Zhu"
+date: "11:59PM Nov 4th"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+
+# Loading in the cleaned survey Data
+survey_data <- read.csv("/cloud/project/reduced_data.csv")
+
+survey_data=na.omit(survey_data)
+
+# Loading in the cleaned census Data
+census_data <- read_csv("/cloud/project/census_data.csv")
+
+
+```
+
+
+
+# Estimating the factors that influence voting for Trump among the residence of the US
+
+
+
+# Model
+
+The main objective of the study is to come up with parameter estiamtes for the linear regression model of factors that the influence the likelihood of one voting for Trump. Here we are interested in predicting the popular vote outcome of the 2020 American federal election Singh et al (2017). To do this we are employing a post-stratification technique. In the following sub-sections I will describe the model specifics and the post-stratification calculation.
+
+
+## Model Specifics
+The binary logistic regression model will be used  to model the proportion of voters who will vote for Donald Trump. This is a naive model, the age,foreign_born,gender,interest,registration+vote_2016,vote_2020, vote_intention, which is recorded as a numeric variable, to model the probability of voting for Donald Trump. The logistic regression model is appropriate since the study involves estimating the influence of several variables on the voting pattern which take binary outcomes. The interest will be estimating the odds of votering having trump as their preferred candidate.  The general form of the model is represented as;$$ln\left( P \over 1-P \right)$$ where we model the log odds of the event, wher p represents the probability of the event.
+$$Z_{i} = ln{\left(P_{i} \over 1-P_{i} \right)} = \beta_{0} + \beta_{1} x_{1} + . . + \beta_{n} x_{n}$$
+
+
+
+Where $y$ represents the proportion of voters who will vote for Donald Trump. Similarly, $\beta_0$ represents the intercept of the model, and is the probability of voting for Donald Trump at age 0. Additionally, $\beta_1$ represents the slope of the model. So, for everyone one unit increase in age, we expect a $\beta_1$ increase in the probability of voting for Donald Trump.  The above equation can be modeled using the glm() by setting the family argument to "binomial". But we are more interested in the probability of the event, than the log odds of the event. The ods of an events presents the raltive risk of tendncey of the desired outcome occuring given certain measures or values of the indipendent variables.The log odds of the event, can be converted to probability of event as follows:$$P_{i} = 1 - {\left( 1 \over 1 + e^z_{i}\right)}$$
+```{r,include=FALSE}
+#Exploratory data analysis
+install.packages("epiDisplay")
+library(epiDisplay)
+```
+```{r}
+tab1(survey_data$interest, sort.group = "decreasing", cum.percent = TRUE,main = "Some people follow what's  going on in government most of the time, when..")
+
+tab1(survey_data$registration, sort.group = "decreasing", cum.percent = TRUE,main = "Distribution of registration status")
+attach(survey_data)
+
+tab1(survey_data$vote_2016, sort.group = "decreasing", cum.percent = TRUE,main = "Distribution of 2016 voting pattern")
+
+
+
+tab1(survey_data$vote_intention, sort.group = "decreasing", cum.percent = TRUE,main = "Distribution of vote intention")
+
+tab1(survey_data$vote_2020, sort.group = "decreasing", cum.percent = TRUE,main = "Distribution of 2020 voting pattern")
+
+
+tab1(survey_data$ideo5, sort.group = "decreasing", cum.percent = TRUE,main = "In general, how would you describe your own political viewpoint?")
+
+
+tab1(survey_data$employment, sort.group = "decreasing", cum.percent = TRUE,main = "Describe your current employments status")
+
+tab1(survey_data$gender, sort.group = "decreasing", cum.percent = TRUE,main = "Distribution of respondents by gender")
+```
+
+```{r,include=FALSE}
+
+attach(survey_data)
+```
+```{r,include=FALSE}
+install.packages("pROC")
+library(pROC)
+
+```
+```{r}
+# Create Training Data
+input_ones <- survey_data[which(survey_data$vote_trump == 1), ]  # all 1's
+input_zeros <- survey_data[which(survey_data$vote_trump == 0), ]  # all 0's
+set.seed(100)  # for repeatability of samples
+input_ones_training_rows <- sample(1:nrow(input_ones), 0.7*nrow(input_ones))  # 1's for training
+input_zeros_training_rows <- sample(1:nrow(input_zeros), 0.7*nrow(input_ones))  # 0's for training. Pick as many 0's as 1's
+
+
+#training. Pick as many 0's as 1's
+training_ones <- input_ones[input_ones_training_rows, ]  
+training_zeros <- input_zeros[input_zeros_training_rows, ]
+trainingData <- rbind(training_ones, training_zeros)  # row bind the 1's and 0's 
+
+# Create Test Data
+test_ones <- input_ones[-input_ones_training_rows, ]
+test_zeros <- input_zeros[-input_zeros_training_rows, ]
+testData<-rbind(test_ones, test_zeros) 
+# Creating the Model
+
+model <- lm(vote_trump ~ age+interest+gender+vote_intention+vote_2020, data=survey_data);#summary(model)
+
+
+predicted <- plogis(predict(model, testData))  # predicted scores
+# or
+predicted <- predict(model, testData, type="response")
+
+pROC_obj=roc(testData$vote_trump, predicted,smoothed = TRUE,
+            # arguments for ci
+            ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+            # arguments for plot
+            plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+            print.auc=TRUE, show.thres=TRUE)
+
+sens.ci <- ci.se(pROC_obj)
+plot(sens.ci, type="shape", col="lightblue")
+## Warning in plot.ci.se(sens.ci, type = "shape", col = "lightblue"): Low
+## definition shape.
+plot(sens.ci, type="bars")
+# Model Results (to Report in Results section)
+# summary(model)
+# OR
+broom::tidy(model)
+
+
+m1=exp(model$coefficients);m1
+
+broom::tidy(m1)
+
+
+```
+
+## Post-Stratification 
+In order to estimate the proportion of voters who will vote for Donald Trump I need to perform a post-stratification analysis. Here I create cells based off different ages. Using the model described in the previous sub-section I will estimate the proportion of voters in each age bin. I will then weight each proportion estimate (within each bin) by the respective population size of that bin and sum those values and divide that by the entire population size. Survey is a good statistical tool in collection of data from people. The data collected from the survey conducted is analyzed using R-studio and findings presented as percentages in tabular forms. From the findings above most of the people of the united states are not considering to vote for Donald Trump in the 2020 general election. Only 33% of the people that participated in the survey are willing to vote for Donald Trump in 2020 general election. 84% of those who voted for Trump in 2016 are considering to vote for him again in the 2020 general election. Of the sample surveyed the white, males, those of age 65 years and above, republican and those with very conservative ideology consider voting for Donald Trump in 2020 general election.  At least 30 % of the sample in each census region are willing to vote for Trump in the coming election.  8% of the democrats are also considering voting for trump while 88% of the democrats would not be voting for him. The Black race are not considering voting for trump. This is also evident in the youths who are aged 18-29 years; only 22 % of the sample showed interest in voting for Trump. 42 % of those who earn income of above 100k are willing to vote in trump in the 2020 general election whereas those of liberal ideology are not considering voting for trump, only 9% show an interest in him. 
+
+
+```{r}
+library(dplyr)
+model2 <- lm(vote_trump ~ age+gender, data=survey_data);
+summary(model2)
+plot(model2)
+```
+```{r}
+census_data1<-census_data[1:2783,]
+
+predicted2 <- plogis(predict(model2, census_data1)) 
+head(predicted2)
+length(predicted2)
+
+pROC_obj=roc(testData$vote_trump, predicted2,smoothed = TRUE,
+            ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+            plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+            print.auc=TRUE, show.thres=TRUE)
+
+```
+# Results
+Even before fititng the model, it was clear from the frquency tabulation that most of the individuals would not vote for trump, up to 61.3%(3720) stated that they were against Trump's bid. From the sample, only 38.7%(2347) of the indicated they would vote for Trump. 
+
+The results of the model indicated that the age of individuals, intention to vote a were significant in expalining the election outcome.  As the age of an individual increases, the likelihood of that individual voting for trump decreases, this is shown by the negative age coefficent estimate.
+
+# Discussion
+
+The survey intended to establish how favorable is Donald Trump in the US. The survey sample findings show that 21% of the sample population consider Trump to be very favorable while 42% consider him very unfavorable, 6 % haven't heard enough about him. The 21% that consider him very favorable are those with very conservative ideology (63%), those who voted for him in the 2016 general elections, and the republicans.  Those who consider Trump to be very unfavorable are those with liberal ideology, those who voted for Clinton and Jill in the 2016 general elections, the blacks and the Hispanic, the female some whites. 11% of the blacks haven't heard enough about Trump. Generally, Trump is considered unfavorable as can be inferred from the findings.
+
+The predictive model computed the probability of voting trump. Because we have to set the length of response and predictor equal. There are 2783 rows being selected from census data, which is equal to the length of testData. The result of predicted2 tells the probability of voting trump based on gender and age factors.
+
+
+## Weaknesses
+In the process of conducting the analysis, it was noted that the analysis was highly impacted by presence of inconsistent observations such as missing values. A significant effort was undertaken trying to format the data in a manner would make it workable. Future procedure in data collection should be  more rigorous to limit the chances of errors and inconsistencies in the data. 
+
+
+## Next Steps
+Subsequent works related to the study should consider inclusion of more variables in the model. it would also help using other classification techniques such as the random forest model and the artificial neural network models and compare their performance with the linear regression models.
+
+
+# References
+
+Singh, P., Sawhney, R. S., & Kahlon, K. S. (2017, November). Forecasting the 2016 US presidential elections using sentiment analysis. In Conference on e-Business, e-Services and e-Society (pp. 412-423). Springer, Cham.
+
+Survey data source; https://www.voterstudygroup.org/publication/nationscape-data-set
+Acs census data, IPUMS: https://usa.ipums.org/usa/index.shtml
+
+
+
